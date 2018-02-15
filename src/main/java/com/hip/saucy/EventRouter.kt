@@ -3,11 +3,16 @@ package com.hip.saucy
 import com.google.common.collect.ArrayListMultimap
 import com.google.common.collect.Multimap
 import com.hip.saucy.utils.log
+import org.funktionale.either.Either
+import org.funktionale.either.merge
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.lang.reflect.Method
+import kotlin.reflect.KType
 import kotlin.reflect.full.findAnnotation
+import kotlin.reflect.full.isSubtypeOf
 import kotlin.reflect.full.memberFunctions
+import kotlin.reflect.full.starProjectedType
 import kotlin.reflect.jvm.javaMethod
 
 class EventRouter internal constructor(
@@ -42,6 +47,75 @@ class EventRouter internal constructor(
       log().info("Replay complete")
       isReplaying = false
    }
+
+   private fun KType.matchesInstance(instance: Any): Boolean {
+      return instance::class.starProjectedType == this
+   }
+
+   private fun Iterable<KType>.matchesInstance(instance: Any): Boolean {
+      return this.any { it.matchesInstance(instance) }
+   }
+
+   override fun <TFailure, TSuccess> dispatchCommandEvent(commandEvent: CommandEvent<TFailure, TSuccess>): Mono<Either<TFailure, TSuccess>> {
+      val commandEventType = commandEvent::class
+         .supertypes
+         .first { it.isSubtypeOf(CommandEvent::class.starProjectedType) }
+
+
+      val failureType = commandEventType.arguments[0].type!!
+      val successType = commandEventType.arguments[1].type!!
+
+      // Dispatch the command message, and watch the subsequent
+      // event stream.
+      // We're looking for an event that is either our success, or our
+      // failure message.
+      // Note - it could be presented as TSuccess, TFailure *or* Either<TFailure,TSuccess>
+      // The first time that occurs, we capture it and return it out
+      // of the Mono as the result of the command.
+      return this.dispatch(commandEvent)
+         .filter { isSuccessOrFailureMessage(failureType, successType, it) }
+         .collectList()
+         .map { messages ->
+            val message = extractFirstMessage(messages)
+            wrapMessageInEither<TFailure, TSuccess>(failureType, successType, message)
+            // Handle any errors that were thrown
+         }.doOnError { wrapErrorInEither<TFailure>(failureType, it) }
+   }
+
+   private fun <TFailure, TSuccess> wrapMessageInEither(failureType: KType, successType: KType, message: Any): Either<TFailure, TSuccess> {
+      return when {
+         failureType.matchesInstance(message) -> Either.left(message as TFailure)
+         successType.matchesInstance(message) -> Either.right(message as TSuccess)
+         else -> throw IllegalStateException("The message was neither TSuccess nor TFailure, despite previous filter passing.  Shouldn't happen")
+      }
+   }
+
+   private fun <TFailure> wrapErrorInEither(failureType: KType, error: Throwable) {
+      if (failureType.matchesInstance(error)) {
+         Either.left(error as TFailure)
+      } else {
+         throw error
+      }
+   }
+
+   private fun extractFirstMessage(messages: MutableList<Any>): Any {
+      return messages.first().let { first ->
+         when (first) {
+         // If we got an either, get the enclosing type (left or right)
+            is Either<*, *> -> first.merge()!!
+            else -> first
+         }
+      }
+   }
+
+   private fun isSuccessOrFailureMessage(failureType: KType, successType: KType, messasge: Any): Boolean {
+      return when {
+         listOf(failureType, successType).matchesInstance(messasge) -> true
+         messasge is Either<*, *> -> listOf(failureType, successType).matchesInstance(messasge.merge() ?: Unit)
+         else -> false
+      }
+   }
+
 
    override fun <T : Dispatchable> submit(dispatchable: T): Pair<Mono<Event<T>>, Flux<Any>> {
       // If the payload we've been given isn't an actual event, wrap
@@ -88,7 +162,7 @@ class EventRouter internal constructor(
       return futureCommittedEvent to flux
    }
 
-   private fun  <T:Dispatchable> wrapToEvent(dispatchable: T): Event<T> {
+   private fun <T : Dispatchable> wrapToEvent(dispatchable: T): Event<T> {
       return if (dispatchable is Event<*>) {
          dispatchable as Event<T>
       } else {
@@ -173,6 +247,11 @@ class EventRouterBuilder {
 
    fun withEventStore(eventStore: EventStore): EventRouterBuilder {
       this.eventStore = eventStore
+      return this
+   }
+
+   fun withPassThroughEventStore(): EventRouterBuilder {
+      this.eventStore = PassThroughEventStore()
       return this
    }
 

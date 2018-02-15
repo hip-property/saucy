@@ -19,5 +19,5 @@ interface MessageGateway {
       return submit(dispatchable).second
    }
 
-   fun <TSuccess, TFailure> dispatchCommandEvent(commandEvent: CommandEvent<TFailure, TSuccess>): Mono<Either<TFailure, TSuccess>>
+   fun <TFailure, TSuccess> dispatchCommandEvent(commandEvent: CommandEvent<TFailure, TSuccess>): Mono<Either<TFailure, TSuccess>>
 }

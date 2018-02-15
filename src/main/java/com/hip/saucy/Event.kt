@@ -24,6 +24,13 @@ interface Dispatchable
 interface EventPayload : Dispatchable
 
 /**
+ * A message that indicates a specific unit of work should be performed,
+ * with a specific outcome.
+ *
+ */
+interface CommandEvent<TFailureEvent, TSuccessEvent> : Dispatchable
+
+/**
  * An event, with a payload.
  *
  * TODO : Expand the header content with additional

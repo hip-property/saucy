@@ -1,5 +1,6 @@
 package com.hip.saucy
 
+import org.funktionale.either.Either
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 
@@ -17,4 +18,6 @@ interface MessageGateway {
    fun dispatch(dispatchable: Dispatchable): Flux<Any> {
       return submit(dispatchable).second
    }
+
+   fun <TSuccess, TFailure> dispatchCommandEvent(commandEvent: CommandEvent<TFailure, TSuccess>): Mono<Either<TFailure, TSuccess>>
 }

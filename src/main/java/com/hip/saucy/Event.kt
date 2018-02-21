@@ -27,6 +27,11 @@ interface EventPayload : Dispatchable
  * A message that indicates a specific unit of work should be performed,
  * with a specific outcome.
  *
+ * Use CommandEvents in systems that are purely event-sourced.
+ * CommandEvents still inherit all traditional Event behaviour,
+ * ie., are replayed when the service is restarted.
+ *
+ *
  */
 interface CommandEvent<TFailureEvent, TSuccessEvent> : Dispatchable
 
